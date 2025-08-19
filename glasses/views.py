@@ -1,13 +1,19 @@
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
-from rest_framework import status
-from glasses.models import Glasses, Purpose, GlassesImage
 from .serializers import GlassesSerializer
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from django.db.models import Q, Count
 from typing import List, Tuple, Optional
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+from django.db import transaction
+from glasses.models import Glasses, Purpose, GlassesPurpose, GlassesImage
+from .serializers import GlassesDetailSerializer
 import json
+from rest_framework import generics
+from rest_framework.permissions import AllowAny
 
 WEIGHT_RANGES = {
     "Light": (None, 20.0),
@@ -59,26 +65,141 @@ class UploadGlassesImagesView(APIView):
             return Response({'error': 'Glasses not found with this id'}, status=status.HTTP_404_NOT_FOUND)
 
 class AddGlassesWithImagesView(APIView):
-    parser_classes = (MultiPartParser, FormParser)
+    permission_classes = [permissions.IsAuthenticated]
 
-    def post(self, request):
-        glasses_data = {key: value for key, value in request.data.items() if key != 'images'}
-        purposes_data = request.data.getlist('purposes', [])
-        serializer = GlassesSerializer(data=glasses_data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        glasses = serializer.save()
-        if purposes_data:
-            for p_name in purposes_data:
-                purpose_obj, _ = Purpose.objects.get_or_create(name=p_name)
-                glasses.purposes.add(purpose_obj)
-        images = request.FILES.getlist('images')
-        if not (1 <= len(images) <= 3):
-            return Response({'error': 'You must upload between 1 and 3 images'}, status=status.HTTP_400_BAD_REQUEST)
-        for img in images:
-            GlassesImage.objects.create(glasses=glasses, image=img)
-        return Response({'success': 'Glasses with images added successfully', 'frame_id': glasses.frame_id, 'images_uploaded': len(images), 'data': GlassesSerializer(glasses).data}, status=status.HTTP_201_CREATED)
+    def post(self, request, *args, **kwargs):
+        user = request.user
 
+        # ✅ 1. تحقق أن المستخدم Store Owner
+        if not hasattr(user, "store"):
+            return Response(
+                {"error": "Only store owners can add glasses."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        store = user.store
+
+        # ✅ 2. جلب البيانات الأساسية
+        shape = request.data.get("shape")
+        material = request.data.get("material")
+        size = request.data.get("size")
+        gender = request.data.get("gender")
+        tone = request.data.get("tone")
+        color = request.data.get("color")
+        price = request.data.get("price")
+        weight = request.data.get("weight")
+        manufacturer = request.data.get("manufacturer")
+
+        # ✅ 3. تحقق من الحقول الإلزامية
+        required_fields = [shape, material, size, gender, tone, color, price]
+        if not all(required_fields):
+            return Response(
+                {"error": "Missing required fields (shape, material, size, gender, tone, color, price)."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ✅ 4. تحقق عدم تكرار النظارة لنفس المتجر
+        if Glasses.objects.filter(
+            store=store,
+            shape=shape,
+            material=material,
+            size=size,
+            gender=gender,
+            tone=tone,
+            color=color,
+            price=price
+        ).exists():
+            return Response(
+                {"error": "This glasses model already exists for this store."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            with transaction.atomic():
+                # ✅ 5. إنشاء النظارة
+                new_glasses = Glasses.objects.create(
+                    store=store,
+                    shape=shape,
+                    material=material,
+                    size=size,
+                    gender=gender,
+                    tone=tone,
+                    color=color,
+                    weight=weight,
+                    manufacturer=manufacturer,
+                    price=price
+                )
+
+                # ✅ 6. ربط الـ purposes
+                purposes = request.data.getlist("purposes[]") or request.data.getlist("purposes")
+                added_purposes = []
+                for p_name in purposes:
+                    try:
+                        purpose_obj = Purpose.objects.get(name__iexact=p_name.strip())
+                        GlassesPurpose.objects.get_or_create(glasses=new_glasses, purpose=purpose_obj)
+                        added_purposes.append(purpose_obj.name)
+                    except Purpose.DoesNotExist:
+                        pass  # لو كتب اسم غير موجود نتجاهله
+
+                # ✅ 7. حفظ الصور
+                images = request.FILES.getlist("images")
+                uploaded_images = []
+                for img in images:
+                    gimg = GlassesImage.objects.create(glasses=new_glasses, image=img)
+                    uploaded_images.append({"id": gimg.id, "image": gimg.image.url})
+
+                # ✅ 8. إرجاع الرد
+                return Response({
+                    "success": "Glasses with images added successfully",
+                    "glasses_id": new_glasses.id,
+                    "store": store.store_name,
+                    "images_uploaded": len(uploaded_images),
+                    "data": {
+                        "id": new_glasses.id,
+                        "shape": new_glasses.shape,
+                        "material": new_glasses.material,
+                        "size": new_glasses.size,
+                        "gender": new_glasses.gender,
+                        "tone": new_glasses.tone,
+                        "color": new_glasses.color,
+                        "weight": new_glasses.weight,
+                        "manufacturer": new_glasses.manufacturer,
+                        "price": new_glasses.price,
+                        "store": store.id,
+                        "purposes": added_purposes,
+                        "images": uploaded_images
+                    }
+                }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class GlassesDetailView(generics.RetrieveAPIView):
+    queryset = Glasses.objects.all()
+    serializer_class = GlassesDetailSerializer
+    permission_classes = [AllowAny]
+    lookup_field = "id"          # 👈 نقوله يستخدم id بدل pk
+    lookup_url_kwarg = "glasses_id"  # 👈 نقوله الكلمة المفتاحية بالـ URL اسمها glasses_id
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()  # النظارة الحالية
+        serializer = self.get_serializer(instance)
+
+        # 🔍 البحث عن نظارات مشابهة (نفس الشكل + الجنس + الحجم)
+        similar_glasses = Glasses.objects.filter(
+            shape=instance.shape,
+            gender=instance.gender,
+            size=instance.size
+        ).exclude(id=instance.id)[:5]  # نستثني النظارة الحالية + نحدد 5 فقط
+
+        similar_serializer = GlassesSerializer(similar_glasses, many=True)
+
+        return Response({
+            "glasses": serializer.data,
+            "similar_glasses": similar_serializer.data
+        })
+    
 class ListGlassesView(ListAPIView):
     queryset = Glasses.objects.all()
     serializer_class = GlassesSerializer

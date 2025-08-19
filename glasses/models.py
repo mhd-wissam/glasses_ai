@@ -1,25 +1,5 @@
-# from django.db import models
-
-# # Create your models here.
-
-# class Glasses(models.Model):
-#     frame_id = models.CharField(max_length=100, unique=True)
-#     material = models.CharField(max_length=100)
-#     rim = models.CharField(max_length=50)
-#     shape = models.CharField(max_length=50)
-#     size = models.CharField(max_length=50)
-#     gender = models.CharField(max_length=10)
-#     weight = models.FloatField(null=True, blank=True)
-#     frame_width = models.IntegerField()
-#     bridge = models.IntegerField()
-#     lens_width = models.IntegerField()
-#     lens_height = models.IntegerField()
-#     temple_length = models.IntegerField()
-#     model_3d = models.FileField(upload_to='glasses_models/', null=True, blank=True)
-#     def __str__(self):
-#         return f"{self.frame_id} - {self.shape}"
-
 from django.db import models
+from stores.models import Store
 
 class Purpose(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -95,53 +75,57 @@ class Glasses(models.Model):
         BEIGE = "Beige"
         PEACH = "Peach"
 
-    frame_id = models.CharField(max_length=100, unique=True)
-    material = models.CharField(max_length=50, choices=Material.choices)
-    rim = models.CharField(max_length=50)
+    # ربط المتجر
+
+
+    # الشركة المصنعة
     shape = models.CharField(max_length=50, choices=Shape.choices)
+    material = models.CharField(max_length=50, choices=Material.choices)
     size = models.CharField(max_length=20, choices=Size.choices)
     gender = models.CharField(max_length=10, choices=Gender.choices)
     tone = models.CharField(max_length=10, choices=Tone.choices)
     color = models.CharField(max_length=20, choices=GeneralColor.choices)
-
-    frame_width = models.IntegerField()
-    bridge = models.IntegerField()
-    lens_width = models.IntegerField()
-    lens_height = models.IntegerField()
-    temple_length = models.IntegerField()
-
     weight = models.FloatField(null=True, blank=True)
+    manufacturer = models.CharField(max_length=255, blank=True, null=True)
     price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    model_3d = models.FileField(upload_to='glasses_models/', null=True, blank=True)
-
+    model_3d = models.FileField(upload_to="glasses_models/", null=True, blank=True)
+    # store = models.ForeignKey("users.Store", on_delete=models.CASCADE, related_name="glasses")
+    store = models.ForeignKey(
+        Store,
+        on_delete=models.CASCADE,
+        related_name="glasses",
+        null=True,
+        blank=True
+    )
     purposes = models.ManyToManyField(
-        Purpose,
-        through='GlassesPurpose',
-        related_name='glasses'
+        "Purpose",
+        through="GlassesPurpose",
+        related_name="glasses"
     )
 
     def __str__(self):
-        return f"{self.frame_id} - {self.shape}"
+        return f"{self.id} - {self.shape} ({self.store.store_name})"
 
 
 class GlassesPurpose(models.Model):
-
     glasses = models.ForeignKey(Glasses, on_delete=models.CASCADE)
     purpose = models.ForeignKey(Purpose, on_delete=models.CASCADE)
 
     class Meta:
-        unique_together = ('glasses', 'purpose') 
+        unique_together = ("glasses", "purpose")
         verbose_name = "Glasses-Purpose"
         verbose_name_plural = "Glasses-Purposes"
 
     def __str__(self):
-        return f"{self.glasses.frame_id} ↔ {self.purpose.name}"
+        return f"{self.id} ↔ {self.purpose.name}"
 
 
 class GlassesImage(models.Model):
-    glasses = models.ForeignKey(Glasses, related_name='images', on_delete=models.CASCADE)
-    image = models.ImageField(upload_to='glasses_images/')
+    glasses = models.ForeignKey(
+        Glasses, related_name="images", on_delete=models.CASCADE
+    )
+    image = models.ImageField(upload_to="glasses_images/")
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Image for {self.glasses.frame_id}"
+        return f"Image for {self.id}"
