@@ -1,27 +1,24 @@
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
-from .serializers import GlassesSerializer
+from .serializers import GlassesSerializer, GlassesDetailSerializer
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from django.db.models import Q, Count
 from typing import List, Tuple, Optional
-from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework import status, permissions
 from django.db import transaction
 from glasses.models import Glasses, Purpose, GlassesPurpose, GlassesImage
-from .serializers import GlassesDetailSerializer
 import json
-from rest_framework import generics
-from rest_framework.permissions import AllowAny
 
 WEIGHT_RANGES = {
     "Light": (None, 20.0),
     "Medium": (20.0, 35.0),
 }
 
+
 class Upload3DModelView(APIView):
     parser_classes = (MultiPartParser, FormParser)
+    permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
 
     def post(self, request):
         frame_id = request.data.get('frame_id')
@@ -36,7 +33,10 @@ class Upload3DModelView(APIView):
         except Glasses.DoesNotExist:
             return Response({'error': 'Glasses not found with this frame_id'}, status=status.HTTP_404_NOT_FOUND)
 
+
 class AddGlassesView(APIView):
+    permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
+
     def post(self, request):
         data = request.data.copy()
         purposes = data.getlist('purposes')
@@ -48,8 +48,10 @@ class AddGlassesView(APIView):
             return Response({'success': 'Glasses saved successfully', 'data': serializer.data}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 class UploadGlassesImagesView(APIView):
     parser_classes = (MultiPartParser, FormParser)
+    permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
 
     def post(self, request):
         glasses_id = request.data.get('id')
@@ -64,13 +66,13 @@ class UploadGlassesImagesView(APIView):
         except Glasses.DoesNotExist:
             return Response({'error': 'Glasses not found with this id'}, status=status.HTTP_404_NOT_FOUND)
 
+
 class AddGlassesWithImagesView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
 
     def post(self, request, *args, **kwargs):
         user = request.user
 
-        # ✅ 1. تحقق أن المستخدم Store Owner
         if not hasattr(user, "store"):
             return Response(
                 {"error": "Only store owners can add glasses."},
@@ -78,8 +80,6 @@ class AddGlassesWithImagesView(APIView):
             )
 
         store = user.store
-
-        # ✅ 2. جلب البيانات الأساسية
         shape = request.data.get("shape")
         material = request.data.get("material")
         size = request.data.get("size")
@@ -90,7 +90,6 @@ class AddGlassesWithImagesView(APIView):
         weight = request.data.get("weight")
         manufacturer = request.data.get("manufacturer")
 
-        # ✅ 3. تحقق من الحقول الإلزامية
         required_fields = [shape, material, size, gender, tone, color, price]
         if not all(required_fields):
             return Response(
@@ -98,7 +97,6 @@ class AddGlassesWithImagesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # ✅ 4. تحقق عدم تكرار النظارة لنفس المتجر
         if Glasses.objects.filter(
             store=store,
             shape=shape,
@@ -116,7 +114,6 @@ class AddGlassesWithImagesView(APIView):
 
         try:
             with transaction.atomic():
-                # ✅ 5. إنشاء النظارة
                 new_glasses = Glasses.objects.create(
                     store=store,
                     shape=shape,
@@ -130,7 +127,6 @@ class AddGlassesWithImagesView(APIView):
                     price=price
                 )
 
-                # ✅ 6. ربط الـ purposes
                 purposes = request.data.getlist("purposes[]") or request.data.getlist("purposes")
                 added_purposes = []
                 for p_name in purposes:
@@ -139,16 +135,14 @@ class AddGlassesWithImagesView(APIView):
                         GlassesPurpose.objects.get_or_create(glasses=new_glasses, purpose=purpose_obj)
                         added_purposes.append(purpose_obj.name)
                     except Purpose.DoesNotExist:
-                        pass  # لو كتب اسم غير موجود نتجاهله
+                        pass
 
-                # ✅ 7. حفظ الصور
                 images = request.FILES.getlist("images")
                 uploaded_images = []
                 for img in images:
                     gimg = GlassesImage.objects.create(glasses=new_glasses, image=img)
                     uploaded_images.append({"id": gimg.id, "image": gimg.image.url})
 
-                # ✅ 8. إرجاع الرد
                 return Response({
                     "success": "Glasses with images added successfully",
                     "glasses_id": new_glasses.id,
@@ -175,51 +169,59 @@ class AddGlassesWithImagesView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class GlassesDetailView(generics.RetrieveAPIView):
+class GlassesDetailView(RetrieveAPIView):
     queryset = Glasses.objects.all()
     serializer_class = GlassesDetailSerializer
-    permission_classes = [AllowAny]
-    lookup_field = "id"          # 👈 نقوله يستخدم id بدل pk
-    lookup_url_kwarg = "glasses_id"  # 👈 نقوله الكلمة المفتاحية بالـ URL اسمها glasses_id
+    permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
+    lookup_field = "id"
+    lookup_url_kwarg = "glasses_id"
 
     def retrieve(self, request, *args, **kwargs):
-        instance = self.get_object()  # النظارة الحالية
+        instance = self.get_object()
         serializer = self.get_serializer(instance)
 
-        # 🔍 البحث عن نظارات مشابهة (نفس الشكل + الجنس + الحجم)
         similar_glasses = Glasses.objects.filter(
             shape=instance.shape,
             gender=instance.gender,
             size=instance.size
-        ).exclude(id=instance.id)[:5]  # نستثني النظارة الحالية + نحدد 5 فقط
+        ).exclude(id=instance.id)[:5]
 
-        similar_serializer = GlassesSerializer(similar_glasses, many=True)
+        similar_serializer = GlassesSerializer(similar_glasses, many=True, context={"request": request})
 
         return Response({
             "glasses": serializer.data,
             "similar_glasses": similar_serializer.data
         })
-    
+
+
 class ListGlassesView(ListAPIView):
     queryset = Glasses.objects.all()
     serializer_class = GlassesSerializer
+    permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
+
 
 class RetrieveGlassesView(RetrieveAPIView):
     queryset = Glasses.objects.all()
     serializer_class = GlassesSerializer
     lookup_field = 'id'
+    permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
+
 
 class GlassesByMaterialFormDataView(APIView):
+    permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
+
     def post(self, request, *args, **kwargs):
         materials = request.data.getlist('materials[]')
         if not materials:
             return Response({"error": "No materials provided"}, status=status.HTTP_400_BAD_REQUEST)
         queryset = Glasses.objects.filter(material__in=materials)
-        serializer = GlassesSerializer(queryset, many=True)
+        serializer = GlassesSerializer(queryset, many=True, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 class GlassesSmartFilterView(APIView):
     parser_classes = (JSONParser, FormParser, MultiPartParser)
+    permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
 
     def _qgetlist(self, obj, key: str) -> List[str]:
         if hasattr(obj, "getlist"):
@@ -286,6 +288,7 @@ class GlassesSmartFilterView(APIView):
         materials     = self._extract_list(request, "materials")
         purpose_names = self._extract_list(request, "purposes")
         purpose_ids   = [int(x) for x in self._extract_list(request, "purpose_ids") if str(x).isdigit()]
+
         qs = Glasses.objects.all()
         g_vals = self._gender_values(gender)
         if g_vals:
@@ -311,7 +314,8 @@ class GlassesSmartFilterView(APIView):
             qs = (qs.filter(purposes__in=purpose_ids)
                     .annotate(purpose_match_count=Count("purposes", filter=Q(purposes__in=purpose_ids), distinct=True))
                     .filter(purpose_match_count=len(set(purpose_ids))))
-        data = GlassesSerializer(qs, many=True).data
+
+        data = GlassesSerializer(qs, many=True, context={"request": request}).data
         return Response({"count": len(data), "results": data}, status=status.HTTP_200_OK)
 
     def get(self, request, *args, **kwargs):

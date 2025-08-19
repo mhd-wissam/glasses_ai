@@ -66,3 +66,18 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['name'] = user.name
         token['role'] = user.role
         return token
+
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ["id", "name", "email", "role", "phone"]  # زود الحقول اللي بدك تعرضها
+    
+from rest_framework import serializers
+from .models import Favorite
+
+class FavoriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Favorite
+        fields = ["id", "user", "glasses", "is_favorite", "created_at"]
+        read_only_fields = ["user", "created_at"]    

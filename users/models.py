@@ -67,3 +67,28 @@ class CustomerProfile(models.Model):
     def __str__(self):
         return f"Profile of {self.user.name}"
 
+# users/models.py
+
+from django.conf import settings
+from django.db import models
+
+class Favorite(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="favorites"
+    )
+    glasses = models.ForeignKey(
+        "glasses.Glasses",
+        on_delete=models.CASCADE,
+        related_name="favorites"
+    )
+    is_favorite = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "glasses")  # كل مستخدم لا يكرر نفس النظارة
+
+    def __str__(self):
+        return f"{self.user.username} -> {self.glasses.id} ({self.is_favorite})"
+
