@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import CustomUser
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework.exceptions import AuthenticationFailed
-
+from django.contrib.auth.password_validation import validate_password
 class UserRegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
 
@@ -71,7 +71,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = ["id", "name", "email", "role", "phone"]  # زود الحقول اللي بدك تعرضها
+        fields = ["id", "name", "email", "role", "phone", "is_active"]  # ✅ أضفنا is_active
     
 from rest_framework import serializers
 from .models import Favorite
@@ -81,3 +81,27 @@ class FavoriteSerializer(serializers.ModelSerializer):
         model = Favorite
         fields = ["id", "user", "glasses", "is_favorite", "created_at"]
         read_only_fields = ["user", "created_at"]    
+
+class UserUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ["id","name", "email", "phone"]  # الحقول اللي تسمح بتعديلها
+        extra_kwargs = {
+            "email": {"required": False},
+            "name": {"required": False},
+            "phone": {"required": False},
+        }
+
+    def update(self, instance, validated_data):
+        return super().update(instance, validated_data)        
+    
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True)
+    confirm_password = serializers.CharField(required=True)
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+        validate_password(attrs["new_password"])
+        return attrs

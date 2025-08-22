@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 from .models import CustomUser
 from .serializers import UserRegisterSerializer, MyTokenObtainPairSerializer, StoreOwnerCreateSerializer
+from .serializers import UserUpdateSerializer, ChangePasswordSerializer
 from rest_framework.permissions import IsAuthenticated
 from .serializers import UserSerializer   # لازم تكون عامل Serializer لليوزر
 
@@ -80,3 +81,55 @@ class FavoriteToggleView(generics.CreateAPIView):
             favorite.save()
 
         serializer.instance = favorite
+
+class StoreOwnersListView(generics.ListAPIView):
+    queryset = CustomUser.objects.filter(role='store_owner')
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAdminUser]  # يفضل تخليها للـ admin فقط
+
+class UserUpdateProfileView(generics.UpdateAPIView):
+    serializer_class = UserUpdateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        # المستخدم يعدل حسابه الشخصي فقط
+        return self.request.user  
+
+class ChangePasswordView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        old_password = serializer.validated_data["old_password"]
+        new_password = serializer.validated_data["new_password"]
+
+        if not user.check_password(old_password):
+            return Response(
+                {"detail": "Old password is incorrect."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user.set_password(new_password)
+        user.save()
+
+        return Response(
+            {"detail": "Password changed successfully."},
+            status=status.HTTP_200_OK
+        )
+    
+from rest_framework import generics, permissions
+from glasses.models import Glasses
+from glasses.serializers import GlassesSerializer
+
+class FavoriteListView(generics.ListAPIView):
+    serializer_class = GlassesSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Glasses.objects.filter(
+            favorites__user=self.request.user,
+            favorites__is_favorite=True
+        ).prefetch_related("images", "purposes").select_related("store")
