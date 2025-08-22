@@ -6,7 +6,8 @@ from .models import Order
 from .serializers import (
     OrderSerializer,
     OrderCreateSerializer,
-    OrderStatusUpdateSerializer
+    OrderStatusUpdateSerializer,
+    OrderUpdateSerializer
 )
 
 
@@ -21,12 +22,11 @@ class OrderCreateView(generics.CreateAPIView):
         order = serializer.save()
 
         return Response({
-            "message": "✅ Order created successfully",
+            "message": "Order created successfully",
             "order": OrderSerializer(order, context={"request": request}).data
         }, status=status.HTTP_201_CREATED)
 
 
-# 📦 عرض طلباتي
 class MyOrdersView(generics.ListAPIView):
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -64,3 +64,42 @@ class OrderStatusUpdateView(generics.UpdateAPIView):
             "message": "✅ Order status updated successfully",
             "order": OrderSerializer(order, context={"request": request}).data
         }, status=status.HTTP_200_OK)
+
+class OrderUpdateView(generics.UpdateAPIView):
+    queryset = Order.objects.all()
+    serializer_class = OrderUpdateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def update(self, request, *args, **kwargs):
+        order = self.get_object()
+
+        # تأكد أنه طلب للمستخدم نفسه
+        if order.user != request.user:
+            raise PermissionDenied("⚠️ You cannot edit this order.")
+
+        serializer = self.get_serializer(order, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save()
+
+        return Response({
+            "message": "✅ Order updated successfully",
+            "order": OrderSerializer(order, context={"request": request}).data
+        }, status=status.HTTP_200_OK)
+    
+class OrderDeleteView(generics.DestroyAPIView):
+    queryset = Order.objects.all()
+    permission_classes = [permissions.IsAuthenticated]
+
+    def destroy(self, request, *args, **kwargs):
+        order = self.get_object()
+
+        # تحقق أنه طلب المستخدم نفسه
+        if order.user != request.user:
+            raise PermissionDenied("⚠️ You cannot delete this order.")
+
+        # تحقق من حالة الطلب
+        if order.status != "pending":
+            raise PermissionDenied("⚠️ Cannot delete order unless it is still pending.")
+
+        order.delete()
+        return Response({"message": "🗑️ Order deleted successfully."})    
