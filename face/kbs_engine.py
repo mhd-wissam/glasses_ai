@@ -2,9 +2,10 @@
 from experta import *
 
 class FaceData(Fact):
-    face_shape = Field(str)
-    face_width_cm = Field(float)
-    skin_tone = Field(str)
+    face_shape = Field(str, mandatory=False)
+    face_width_cm = Field(float, mandatory=False)
+    skin_tone = Field(str, mandatory=False)
+
 
 class GlassesRecommender(KnowledgeEngine):
     def __init__(self):
@@ -83,16 +84,21 @@ class GlassesRecommender(KnowledgeEngine):
     def tone_light(self):
         self.recommended_tone = 'Dark'
 
-    def run_engine(self, face_shape, face_width_cm, skin_tone):
+    def run_engine(self, face_shape=None, face_width_cm=None, skin_tone=None):
         self.reset()
-        self.declare(FaceData(
-            face_shape=face_shape,
-            face_width_cm=face_width_cm,
-            skin_tone=skin_tone
-        ))
+        fact_data = {}
+        if face_shape is not None:
+            fact_data["face_shape"] = face_shape
+        if face_width_cm is not None:
+            fact_data["face_width_cm"] = face_width_cm
+        if skin_tone is not None:
+            fact_data["skin_tone"] = skin_tone
+
+        self.declare(FaceData(**fact_data))
         self.run()
         return {
             'recommended_shape': self.recommended_shape,
             'recommended_size': self.recommended_size,
             'recommended_tone': self.recommended_tone,
         }
+

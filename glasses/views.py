@@ -1,14 +1,16 @@
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
-from .serializers import GlassesSerializer, GlassesDetailSerializer
+from .serializers import GlassesSerializer, GlassesDetailSerializer, GlassesUpdateSerializer
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from django.db.models import Q, Count
 from typing import List, Tuple, Optional
-from rest_framework import status, permissions
 from django.db import transaction
 from glasses.models import Glasses, Purpose, GlassesPurpose, GlassesImage
 import json
+from rest_framework.exceptions import PermissionDenied
+from face.kbs_engine import GlassesRecommender
+from rest_framework import generics, permissions, status
 
 WEIGHT_RANGES = {
     "Light": (None, 20.0),
@@ -320,3 +322,118 @@ class GlassesSmartFilterView(APIView):
 
     def get(self, request, *args, **kwargs):
         return self.post(request, *args, **kwargs)
+
+class GlassesByStoreView(ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]   # غيّرها لـ AllowAny لو بدكها عامة
+    serializer_class = GlassesSerializer
+
+    def get_queryset(self):
+        store_id = self.kwargs.get("store_id")
+        return (
+            Glasses.objects
+            .filter(store_id=store_id)
+            .select_related("store")
+            .prefetch_related("images", "purposes")
+            .order_by("-id")
+        )
+    
+class MyStoreGlassesView(ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = GlassesSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        # تأكد أن لديه متجر
+        if not hasattr(user, "store"):
+            raise PermissionDenied("Only store owners can list their store glasses.")
+        return (
+            Glasses.objects
+            .filter(store=user.store)
+            .select_related("store")
+            .prefetch_related("images", "purposes")
+            .order_by("-id")
+        )
+
+class RecommendGlassesByFaceShapeView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        face_shape = request.data.get("face_shape")
+        if not face_shape:
+            return Response({"error": "face_shape is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 🧠 شغل الـ Expert System فقط بالـ face_shape
+        engine = GlassesRecommender()
+        rec = engine.run_engine(face_shape=face_shape)
+
+
+        recommended_shapes = rec.get("recommended_shape", [])
+        if not recommended_shapes:
+            return Response({
+                "message": f"No recommendations available for face shape '{face_shape}'.",
+                "results": []
+            }, status=status.HTTP_200_OK)
+
+        # 🕶️ استعلام النظارات المناسبة
+        qs = Glasses.objects.filter(shape__in=recommended_shapes)
+        serializer = GlassesSerializer(qs, many=True, context={"request": request})
+
+        return Response({
+            "face_shape": face_shape,
+            "recommended_shapes": recommended_shapes,
+            "count": qs.count(),
+            "results": serializer.data
+        }, status=status.HTTP_200_OK)
+
+# glasses/views.py
+
+class UpdateGlassesView(generics.UpdateAPIView):
+    queryset = Glasses.objects.all()
+    serializer_class = GlassesUpdateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    lookup_field = "id"
+    lookup_url_kwarg = "glasses_id"
+
+    def update(self, request, *args, **kwargs):
+        glasses = self.get_object()
+        user = request.user
+
+        # ✅ تحقق من الصلاحيات
+        if user.role == "admin":
+            pass
+        elif user.role == "store_owner" and hasattr(user, "store") and glasses.store == user.store:
+            pass
+        else:
+            raise PermissionDenied("⚠️ You are not allowed to update this glasses.")
+
+        serializer = self.get_serializer(glasses, data=request.data, partial=False)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        return Response({
+            "message": "✅ Glasses updated successfully",
+            "glasses": GlassesSerializer(glasses, context={"request": request}).data
+        }, status=status.HTTP_200_OK)
+
+class DeleteGlassesView(generics.DestroyAPIView):
+    queryset = Glasses.objects.all()
+    serializer_class = GlassesSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    lookup_field = "id"
+    lookup_url_kwarg = "glasses_id"
+
+    def destroy(self, request, *args, **kwargs):
+        glasses = self.get_object()
+        user = request.user
+
+        if user.role == "admin":
+            pass
+        elif user.role == "store_owner" and hasattr(user, "store") and glasses.store == user.store:
+            pass
+        else:
+            raise PermissionDenied("⚠️ You are not allowed to delete this glasses.")
+
+        self.perform_destroy(glasses)
+        return Response({"message": "✅ Glasses deleted successfully"}, status=status.HTTP_200_OK)
+    
+    

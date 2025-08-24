@@ -103,3 +103,55 @@ class OrderDeleteView(generics.DestroyAPIView):
 
         order.delete()
         return Response({"message": "🗑️ Order deleted successfully."})    
+
+class StoreOrdersView(generics.ListAPIView):
+    serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+
+        # 👮 السماح فقط لصاحب المتجر أو الأدمن
+        if user.role not in ["store_owner", "admin"]:
+            raise PermissionDenied("⚠️ Only store owners or admins can view store orders.")
+
+        if user.role == "admin":
+            # الادمن ممكن يشوف كل الطلبات
+            return Order.objects.all().select_related("store", "user").prefetch_related("items__glasses")
+
+        if not hasattr(user, "store"):
+            raise PermissionDenied("⚠️ You don't have a store.")
+
+        # صاحب المتجر → طلبات متجره فقط
+        return (
+            Order.objects.filter(store=user.store)
+            .select_related("store", "user")
+            .prefetch_related("items__glasses")
+            .order_by("-created_at")
+        )
+    
+class OrderDetailView(generics.RetrieveAPIView):
+    queryset = Order.objects.all().select_related("store", "user").prefetch_related("items__glasses")
+    serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    lookup_field = "id"
+    lookup_url_kwarg = "order_id"
+
+    def get_object(self):
+        order = super().get_object()
+        user = self.request.user
+
+        # ✅ Admin → يشوف الكل
+        if user.role == "admin":
+            return order
+
+        # ✅ Customer → بس طلباته
+        if order.user == user:
+            return order
+
+        # ✅ Store Owner → بس الطلبات بمتجره
+        if user.role == "store_owner" and hasattr(user, "store") and order.store == user.store:
+            return order
+
+        # ❌ لو غير هيك
+        raise PermissionDenied("⚠️ You are not allowed to view this order.")
