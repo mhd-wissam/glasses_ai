@@ -8,9 +8,11 @@ from .models import Store
 from .serializers import StoreSerializer
 from users.models import CustomUser
 
+from rest_framework.parsers import MultiPartParser, FormParser
 
 class StoreInfoView(APIView):
     permission_classes = [permissions.AllowAny]  # لأنه ما عنده توكن لسا
+    parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
         email = request.data.get("email")
@@ -28,27 +30,29 @@ class StoreInfoView(APIView):
         if user.role != "store_owner":
             return Response({"detail": "Only store owners can complete this step."}, status=status.HTTP_403_FORBIDDEN)
 
-
-        # تجهيز بيانات المتجر
+        # تجهيز بيانات المتجر (مع الصورة)
         store_data = {
             "store_name": request.data.get("store_name"),
             "phone": request.data.get("phone"),
             "location_lat": request.data.get("location_lat"),
             "location_lng": request.data.get("location_lng"),
+            "image": request.FILES.get("image"),   # 👈 إضافة الصورة هنا
         }
 
         serializer = StoreSerializer(data=store_data)
         serializer.is_valid(raise_exception=True)
         store = serializer.save(owner=user)
 
+        # تفعيل الحساب
         user.is_active = True
         user.save()
 
+        # توليد التوكين
         refresh = RefreshToken.for_user(user)
 
         return Response({
             "detail": "Store info added, account activated, and token generated.",
-            "store": StoreSerializer(store).data,
+            "store": StoreSerializer(store, context={"request": request}).data,
             "refresh": str(refresh),
             "access": str(refresh.access_token),
         }, status=status.HTTP_201_CREATED)
