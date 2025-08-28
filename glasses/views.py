@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
-from .serializers import GlassesSerializer, GlassesDetailSerializer, GlassesUpdateSerializer
+from .serializers import GlassesSerializer, GlassesDetailSerializer, GlassesUpdateSerializer, GlassesRecommendationSerializer, GlassesCreateSerializer
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from django.db.models import Q, Count
 from typing import List, Tuple, Optional
@@ -11,6 +11,7 @@ import json
 from rest_framework.exceptions import PermissionDenied
 from face.kbs_engine import GlassesRecommender
 from rest_framework import generics, permissions, status
+
 
 WEIGHT_RANGES = {
     "Light": (None, 20.0),
@@ -50,7 +51,6 @@ class AddGlassesView(APIView):
             return Response({'success': 'Glasses saved successfully', 'data': serializer.data}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 class UploadGlassesImagesView(APIView):
     parser_classes = (MultiPartParser, FormParser)
     permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
@@ -67,108 +67,20 @@ class UploadGlassesImagesView(APIView):
             return Response({'success': 'Images uploaded successfully', 'glasses_id': glasses_id, 'uploaded': len(images)})
         except Glasses.DoesNotExist:
             return Response({'error': 'Glasses not found with this id'}, status=status.HTTP_404_NOT_FOUND)
-
+        
 
 class AddGlassesWithImagesView(APIView):
-    permission_classes = [permissions.IsAuthenticated]  # 🔒 لازم توكن
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
-        user = request.user
-
-        if not hasattr(user, "store"):
-            return Response(
-                {"error": "Only store owners can add glasses."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        store = user.store
-        shape = request.data.get("shape")
-        material = request.data.get("material")
-        size = request.data.get("size")
-        gender = request.data.get("gender")
-        tone = request.data.get("tone")
-        color = request.data.get("color")
-        price = request.data.get("price")
-        weight = request.data.get("weight")
-        manufacturer = request.data.get("manufacturer")
-
-        required_fields = [shape, material, size, gender, tone, color, price]
-        if not all(required_fields):
-            return Response(
-                {"error": "Missing required fields (shape, material, size, gender, tone, color, price)."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if Glasses.objects.filter(
-            store=store,
-            shape=shape,
-            material=material,
-            size=size,
-            gender=gender,
-            tone=tone,
-            color=color,
-            price=price
-        ).exists():
-            return Response(
-                {"error": "This glasses model already exists for this store."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            with transaction.atomic():
-                new_glasses = Glasses.objects.create(
-                    store=store,
-                    shape=shape,
-                    material=material,
-                    size=size,
-                    gender=gender,
-                    tone=tone,
-                    color=color,
-                    weight=weight,
-                    manufacturer=manufacturer,
-                    price=price
-                )
-
-                purposes = request.data.getlist("purposes[]") or request.data.getlist("purposes")
-                added_purposes = []
-                for p_name in purposes:
-                    try:
-                        purpose_obj = Purpose.objects.get(name__iexact=p_name.strip())
-                        GlassesPurpose.objects.get_or_create(glasses=new_glasses, purpose=purpose_obj)
-                        added_purposes.append(purpose_obj.name)
-                    except Purpose.DoesNotExist:
-                        pass
-
-                images = request.FILES.getlist("images")
-                uploaded_images = []
-                for img in images:
-                    gimg = GlassesImage.objects.create(glasses=new_glasses, image=img)
-                    uploaded_images.append({"id": gimg.id, "image": gimg.image.url})
-
-                return Response({
-                    "success": "Glasses with images added successfully",
-                    "glasses_id": new_glasses.id,
-                    "store": store.store_name,
-                    "images_uploaded": len(uploaded_images),
-                    "data": {
-                        "id": new_glasses.id,
-                        "shape": new_glasses.shape,
-                        "material": new_glasses.material,
-                        "size": new_glasses.size,
-                        "gender": new_glasses.gender,
-                        "tone": new_glasses.tone,
-                        "color": new_glasses.color,
-                        "weight": new_glasses.weight,
-                        "manufacturer": new_glasses.manufacturer,
-                        "price": new_glasses.price,
-                        "store": store.id,
-                        "purposes": added_purposes,
-                        "images": uploaded_images
-                    }
-                }, status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = GlassesCreateSerializer(data=request.data, context={"request": request})
+        if serializer.is_valid():
+            glasses = serializer.save()
+            return Response({
+                "success": "Glasses with images added successfully",
+                "data": serializer.data
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class GlassesDetailView(RetrieveAPIView):
@@ -436,4 +348,71 @@ class DeleteGlassesView(generics.DestroyAPIView):
         self.perform_destroy(glasses)
         return Response({"message": "✅ Glasses deleted successfully"}, status=status.HTTP_200_OK)
     
+# glasses/views.py
+from .serializers import GlassesSerializer
+from .kbs import SmartRecommenderKBS, GlassesFact, AnalysisResult, UserPreference, RecommendationScore, compute_max_possible_score
+
+class IsCustomer(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and request.user.role == "customer"
     
+class SmartRecommendEndpoint(APIView):
+    permission_classes = [IsCustomer]
+
+    def post(self, request):
+        try:
+            user_input = request.data
+            analysis = {
+                "recommended_shapes": user_input.get("shapes", []),
+                "recommended_size": user_input.get("size","N/A"),
+                "recommended_tone": user_input.get("tone","N/A"),
+            }
+            user_prefs = []
+            if user_input.get("gender"):
+                user_prefs.append({"category":"gender","value":user_input["gender"]})
+            if user_input.get("purposes"):
+                user_prefs.append({"category":"purpose","value":user_input["purposes"]})
+            if user_input.get("weight_preference"):
+                user_prefs.append({"category":"weight_pref","value":"lightweight"})
+            for m in user_input.get("materials",[]):
+                user_prefs.append({"category":"material_pref","value":m})
+
+            max_score = compute_max_possible_score(user_prefs)
+
+            # ORM query
+            glasses_qs = Glasses.objects.select_related("store").prefetch_related("purposes","images")
+
+            # Run engine
+            engine = SmartRecommenderKBS()
+            engine.reset()
+            engine.declare(AnalysisResult(**analysis))
+            for pref in user_prefs: engine.declare(UserPreference(**pref))
+            for g in glasses_qs:
+                tags = list(g.purposes.values_list("name", flat=True))
+                weight_val = int(round(float(g.weight))) if g.weight else 999
+                engine.declare(GlassesFact(
+                    frame_id=g.id, shape=g.shape, material=g.material,
+                    size=g.size, gender=g.gender, tone=g.tone,
+                    color=g.color, weight=weight_val, style_tags=tags
+                ))
+            engine.run()
+
+            # Collect
+            enriched = []
+            for fact in engine.facts.values():
+                if isinstance(fact, RecommendationScore) and fact['score'] > 0:
+                    g = glasses_qs.get(id=fact['frame_id'])
+                    g.score = fact['score']
+                    g.match_percentage = round((fact['score']/max_score)*100,1) if max_score else 0
+                    g.reasons = list(fact['reasons'])
+                    enriched.append(g)
+
+            enriched.sort(key=lambda x: x.score, reverse=True)
+            serializer = GlassesRecommendationSerializer(enriched[:100], many=True, context={"request": request})
+            return Response({
+                "max_possible_score": max_score,
+                "count": len(enriched),
+                "results": serializer.data
+            })
+        except Exception as e:
+            return Response({"detail":f"Internal error: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

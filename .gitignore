@@ -1,7 +1,41 @@
+# Virtual env
 env/
+
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Local DB & logs
 *.sqlite3
 *.log
+
+# Uploaded media (images, models, etc.)
+media/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+
+# Model files
+*.h5
+*.hdf5
+*.pth
+*.pt
+*.onnx
+*.pkl
+*.pickle
+
+# Ignore helper folder
+helper/
+
+# IDE settings
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

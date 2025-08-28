@@ -70,9 +70,11 @@ INSTALLED_APPS = [
     'stores',
     "orders",
     'rest_framework',
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -82,6 +84,10 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+CORS_ORIGIN_ALLOW_ALL = True
+ORS_ALLOWED_ORIGINS = [
+   "http://localhost:8000",
+]
 ROOT_URLCONF = 'backend.urls'
 
 TEMPLATES = [
@@ -141,7 +147,7 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # Internationalization
-# https://docs.djangoproject.com/en/5.2/topics/i18n/
+#https://docs.djangoproject.com/en/5.2/topics/i18n/
 
 LANGUAGE_CODE = 'en-us'
 

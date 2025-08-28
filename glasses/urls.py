@@ -23,4 +23,5 @@ urlpatterns = [
     path("recommend/face-shape/", RecommendGlassesByFaceShapeView.as_view(), name="recommend-by-face-shape"),
     path("<int:glasses_id>/update/", UpdateGlassesView.as_view(), name="update-glasses"),
     path("<int:glasses_id>/delete/", DeleteGlassesView.as_view(), name="delete-glasses"),
+    path('smart-recommend/', SmartRecommendEndpoint.as_view(), name='smart_recommend'),
 ]
