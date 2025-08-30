@@ -65,3 +65,38 @@ class ListStoresView(APIView):
         stores = Store.objects.all()
         serializer = StoreSerializer(stores, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+
+class MyStoreInfoView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        # ✅ جلب متجر المستخدم الحالي
+        user = request.user
+        if not hasattr(user, "store"):
+            return Response({"detail": "You do not own a store."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = StoreSerializer(user.store, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        # ✅ تعديل بيانات المتجر (كاملة)
+        user = request.user
+        if not hasattr(user, "store"):
+            return Response({"detail": "You do not own a store."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = StoreSerializer(user.store, data=request.data, partial=False, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        # ✅ تعديل بيانات المتجر (جزئية)
+        user = request.user
+        if not hasattr(user, "store"):
+            return Response({"detail": "You do not own a store."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = StoreSerializer(user.store, data=request.data, partial=True, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
